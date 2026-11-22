@@ -18,6 +18,10 @@ def _cookie_name():
     return "__Host-agriguard_session" if settings.app_env.lower() in {"production", "prod"} else SESSION_COOKIE
 
 
+def _cookie_samesite():
+    return "none" if settings.app_env.lower() in {"production", "prod"} else "lax"
+
+
 class Credentials(BaseModel):
     email: str = Field(min_length=5, max_length=254, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
     password: str = Field(min_length=8, max_length=128)
@@ -47,7 +51,7 @@ def _set_session(response: Response, token: str):
     response.set_cookie(
         key=_cookie_name(), value=token, max_age=SESSION_DAYS * 24 * 60 * 60,
         httponly=True, secure=settings.app_env.lower() in {"production", "prod"},
-        samesite="lax", path="/",
+        samesite=_cookie_samesite(), path="/",
     )
 
 
@@ -55,7 +59,7 @@ def _clear_session(response: Response):
     response.delete_cookie(
         key=_cookie_name(), httponly=True,
         secure=settings.app_env.lower() in {"production", "prod"},
-        samesite="lax", path="/",
+        samesite=_cookie_samesite(), path="/",
     )
 
 
