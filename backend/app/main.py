@@ -7,7 +7,6 @@ from app.config import settings
 from app.schemas import FarmRequest, CropSuggestionRequest
 from app.auth import router as auth_router, current_user
 from app.database import connect, initialize
-from app.services.demo_data import weather as demo_weather, historical as demo_historical
 from app.services.risk_engine import assess
 from app.services.weather import get_open_meteo
 from app.services.crops import suggest_crops
@@ -81,38 +80,31 @@ def save_farm(request: FarmRequest, user=Depends(current_user)):
 @app.post("/api/crops/suggest")
 async def crop_suggestions(request: CropSuggestionRequest, user=Depends(current_user)):
     if not settings.open_meteo_enabled:
-        forecast = demo_weather(request.latitude, request.longitude)
-        historical = demo_historical(request.latitude, request.longitude)
-        return suggest_crops(request, forecast, historical, "demo")
+        raise HTTPException(status_code=503, detail="Live weather is currently disabled. Please try again later.")
     try:
         forecast, historical, _ = await get_open_meteo(request.latitude, request.longitude)
         return suggest_crops(request, forecast, historical, "live")
     except httpx.HTTPError as exc:
-        forecast = demo_weather(request.latitude, request.longitude)
-        historical = demo_historical(request.latitude, request.longitude)
-        result = suggest_crops(request, forecast, historical, "demo")
         if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
-            result["warning"] = "The live weather provider is temporarily rate-limiting requests. These clearly labeled demo values let you continue; try again later for a live forecast."
-        else:
-            result["warning"] = "Live weather is temporarily unavailable. These clearly labeled demo values let you continue; try again later for a live forecast."
-        return result
+            raise HTTPException(status_code=503, detail="The live weather provider is temporarily rate-limiting requests. Please wait a few minutes and retry.")
+        raise HTTPException(status_code=503, detail="Live weather is temporarily unavailable. Please retry in a few minutes.")
     except Exception:
         raise HTTPException(status_code=502, detail="Weather data could not be processed. Please retry in a few minutes.")
 
 
 @app.post("/api/assess")
 async def create_assessment(request: FarmRequest, user=Depends(current_user)):
-    forecast = demo_weather(request.latitude, request.longitude)
-    historical = demo_historical(request.latitude, request.longitude)
-    current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": 72, "wind_kph": 10}
-    mode = "demo"
-    if settings.open_meteo_enabled:
-        try:
-            forecast, historical, current = await get_open_meteo(request.latitude, request.longitude)
-            mode = "live"
-        except Exception:
-            # Keep the local demo available if a remote provider is unavailable.
-            pass
+    if not settings.open_meteo_enabled:
+        raise HTTPException(status_code=503, detail="Live weather is currently disabled. Please try again later.")
+    try:
+        forecast, historical, current = await get_open_meteo(request.latitude, request.longitude)
+    except httpx.HTTPError as exc:
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            raise HTTPException(status_code=503, detail="The live weather provider is temporarily rate-limiting requests. Please retry shortly.")
+        raise HTTPException(status_code=503, detail="Live weather is temporarily unavailable. Please retry shortly.")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Weather data could not be processed. Please retry shortly.")
+    mode = "live"
     try:
         satellite = await get_sentinel_observation(request.latitude, request.longitude)
     except Exception as exc:

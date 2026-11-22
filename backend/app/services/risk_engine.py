@@ -60,8 +60,8 @@ def assess(req: FarmRequest, forecast: list[dict], historical: dict, current: di
         "crop_stage": {"stage": stage, "days_after_planting": days_after_planting, "estimated_season_progress_pct": round(growth_fraction * 100)},
         "source_mode": mode,
         "data_sources": [
-            {"name": "Weather forecast", "status": "Live" if mode == "live" else "Demo", "detail": "Open-Meteo daily forecast" if mode == "live" else "Deterministic synthetic 14-day weather"},
-            {"name": "Historical rainfall", "status": "Live" if historical.get("source") == "Open-Meteo archive" else "Demo", "detail": historical.get("source", "Illustrative synthetic seasonal baseline")},
+            {"name": "Weather forecast", "status": "Live" if mode == "live" else "Unavailable", "detail": "Open-Meteo daily forecast" if mode == "live" else "Live forecast unavailable"},
+            {"name": "Historical rainfall", "status": "Live" if historical.get("source") == "Open-Meteo archive" else "Unavailable", "detail": historical.get("source", "Historical archive unavailable")},
             {"name": "Copernicus Sentinel-2", "status": "Live" if satellite and satellite.get("available") else "Configured · no clear scene" if satellite and satellite.get("configured") else "Not connected", "detail": satellite.get("source", "Copernicus OAuth credentials not configured") if satellite else "Copernicus OAuth credentials not configured"},
             {"name": "ISRO Bhuvan", "status": "Reference layers", "detail": "OGC thematic services; current NDVI imagery is not wired into this farm view"},
             {"name": "Soil", "status": "Manual input" if req.soil_moisture is not None or req.soil_ph is not None else "Not provided", "detail": "User-entered reading; no automatic sensor feed configured" if req.soil_moisture is not None or req.soil_ph is not None else "No reading supplied; no sensor feed configured"},
@@ -69,6 +69,6 @@ def assess(req: FarmRequest, forecast: list[dict], historical: dict, current: di
         "current_weather": current, "historical_summary": historical,
         "satellite": satellite or {"ndvi": ndvi, "condition": "Healthy" if ndvi is not None and ndvi >= 0.6 else "Watch" if ndvi is not None and ndvi >= 0.35 else "Stressed" if ndvi is not None else "Not connected", "source": "User-entered NDVI" if req.ndvi is not None else "Copernicus Sentinel-2 credentials not configured"},
         "soil": {"moisture_pct": req.soil_moisture, "ph": req.soil_ph}, "risks": risks,
-        "yield": {"risk_pct": yield_risk, "estimated_yield_t_ha": estimated, "baseline_yield_t_ha": baseline, "confidence": "Low · illustrative proxy", "method": "Transparent heuristic using climate stress and demo NDVI; not a trained or validated agronomic model."},
+        "yield": {"risk_pct": yield_risk, "estimated_yield_t_ha": estimated, "baseline_yield_t_ha": baseline, "confidence": "Low · illustrative proxy", "method": "Transparent heuristic using climate stress and available satellite signals; not a trained or validated agronomic model."},
         "recommendations": recommendations, "forecast": forecast,
     }

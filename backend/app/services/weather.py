@@ -1,11 +1,9 @@
 from datetime import date, timedelta
 from time import monotonic
 import httpx
-from app.services.demo_data import historical as demo_historical
 
 _CACHE = {}
 _CACHE_TTL_SECONDS = 15 * 60
-_STALE_TTL_SECONDS = 6 * 60 * 60
 
 async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict], dict, dict]:
     """Fetch forecast plus a comparable historical period when network access is available."""
@@ -24,9 +22,7 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
         forecast_response = await client.get(base, params={**common, "forecast_days": 14})
         try:
             forecast_response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429 and cached and now < cached["stale_until"]:
-                return cached["data"]
+        except httpx.HTTPStatusError:
             raise
         raw = forecast_response.json()["daily"]
         forecast = [{"date": raw["time"][i], "rainfall_mm": raw["precipitation_sum"][i] or 0, "max_temp_c": raw["temperature_2m_max"][i], "min_temp_c": raw["temperature_2m_min"][i]} for i in range(len(raw["time"]))]
@@ -35,8 +31,16 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
             archive_response.raise_for_status()
             archive = archive_response.json()["daily"]
         except (httpx.HTTPError, KeyError, ValueError):
-            summary = demo_historical(latitude, longitude)
-            summary["source"] = "Illustrative demo baseline · archive unavailable"
+            summary = {
+                "period": None,
+                "source": "Open-Meteo archive unavailable",
+                "mean_rainfall_mm": None,
+                "rainfall_anomaly_pct": None,
+                "seasonal_rainfall_normals_mm": {},
+                "latest_kharif_rainfall_mm": None,
+                "hot_days_per_season": None,
+                "note": "Historical archive is temporarily unavailable; only the live forecast is included.",
+            }
             return forecast, summary, {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
     annual = {}
     seasonal = {"Kharif": {}, "Rabi": {}, "Zaid": {}}
@@ -76,7 +80,7 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
     }
     current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
     result = (forecast, summary, current)
-    _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS, "stale_until": now + _STALE_TTL_SECONDS}
+    _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS}
     if len(_CACHE) > 256:
         oldest_key = min(_CACHE, key=lambda item: _CACHE[item]["fresh_until"])
         _CACHE.pop(oldest_key, None)
