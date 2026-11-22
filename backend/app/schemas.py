@@ -12,6 +12,7 @@ class FarmRequest(BaseModel):
     soil_ph: float | None = Field(default=None, ge=0, le=14)
     ndvi: float | None = Field(default=None, ge=-1, le=1)
     planting_date: str = Field(default_factory=lambda: date.today().isoformat())
+    weather_mode: str = Field(default="live", pattern="^(live|sample)$")
     setup_complete: bool = False
 
 

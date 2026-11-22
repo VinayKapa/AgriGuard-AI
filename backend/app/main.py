@@ -1,6 +1,6 @@
 import json
 import httpx
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
@@ -11,6 +11,7 @@ from app.services.risk_engine import assess
 from app.services.weather import get_open_meteo
 from app.services.crops import suggest_crops
 from app.services.satellite import get_sentinel_observation, is_configured
+from app.services.demo_data import weather as sample_weather, historical as sample_historical
 
 app = FastAPI(title="AgriGuard AI API", version="0.1.0", description="Hackathon MVP climate risk and crop impact API")
 allowed_origins = [settings.frontend_origin.rstrip("/")]
@@ -78,7 +79,14 @@ def save_farm(request: FarmRequest, user=Depends(current_user)):
 
 
 @app.post("/api/crops/suggest")
-async def crop_suggestions(request: CropSuggestionRequest, user=Depends(current_user)):
+async def crop_suggestions(request: CropSuggestionRequest, sample: bool = Query(default=False), user=Depends(current_user)):
+    if sample:
+        forecast = sample_weather(request.latitude, request.longitude)
+        historical = sample_historical(request.latitude, request.longitude)
+        historical["source"] = "User-selected sample rainfall baseline"
+        result = suggest_crops(request, forecast, historical, "sample")
+        result["method_note"] = "Sample weather data you selected because the live provider is rate-limiting requests. These values are illustrative and do not represent current field conditions."
+        return result
     if not settings.open_meteo_enabled:
         raise HTTPException(status_code=503, detail="Live weather is currently disabled. Please try again later.")
     try:
@@ -95,6 +103,13 @@ async def crop_suggestions(request: CropSuggestionRequest, user=Depends(current_
 
 @app.post("/api/assess")
 async def create_assessment(request: FarmRequest, user=Depends(current_user)):
+    if request.weather_mode == "sample":
+        forecast = sample_weather(request.latitude, request.longitude)
+        historical = sample_historical(request.latitude, request.longitude)
+        historical["source"] = "User-selected sample rainfall baseline"
+        current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": 72, "wind_kph": 10}
+        satellite = {"configured": is_configured(), "available": False, "ndvi": None, "source": "Sample weather mode; no current satellite observation loaded", "image_base64": None}
+        return assess(request, forecast, historical, current, "sample", satellite)
     if not settings.open_meteo_enabled:
         raise HTTPException(status_code=503, detail="Live weather is currently disabled. Please try again later.")
     try:
