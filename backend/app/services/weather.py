@@ -1,10 +1,19 @@
 from datetime import date, timedelta
+from time import monotonic
 import httpx
 from app.services.demo_data import historical as demo_historical
 
+_CACHE = {}
+_CACHE_TTL_SECONDS = 15 * 60
+_STALE_TTL_SECONDS = 6 * 60 * 60
 
 async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict], dict, dict]:
     """Fetch forecast plus a comparable historical period when network access is available."""
+    key = (round(latitude, 3), round(longitude, 3))
+    now = monotonic()
+    cached = _CACHE.get(key)
+    if cached and now < cached["fresh_until"]:
+        return cached["data"]
     start = date.today().isoformat()
     end = (date.today() + timedelta(days=13)).isoformat()
     archive_start = (date.today() - timedelta(days=3650)).isoformat()
@@ -13,7 +22,12 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
     common = {"latitude": latitude, "longitude": longitude, "timezone": "auto", "daily": "precipitation_sum,temperature_2m_max,temperature_2m_min"}
     async with httpx.AsyncClient(timeout=10) as client:
         forecast_response = await client.get(base, params={**common, "forecast_days": 14})
-        forecast_response.raise_for_status()
+        try:
+            forecast_response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429 and cached and now < cached["stale_until"]:
+                return cached["data"]
+            raise
         raw = forecast_response.json()["daily"]
         forecast = [{"date": raw["time"][i], "rainfall_mm": raw["precipitation_sum"][i] or 0, "max_temp_c": raw["temperature_2m_max"][i], "min_temp_c": raw["temperature_2m_min"][i]} for i in range(len(raw["time"]))]
         try:
@@ -61,4 +75,9 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
         "note": "Seasonal totals are calendar-month approximations from archived reanalysis, not official district monsoon records.",
     }
     current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
-    return forecast, summary, current
+    result = (forecast, summary, current)
+    _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS, "stale_until": now + _STALE_TTL_SECONDS}
+    if len(_CACHE) > 256:
+        oldest_key = min(_CACHE, key=lambda item: _CACHE[item]["fresh_until"])
+        _CACHE.pop(oldest_key, None)
+    return result

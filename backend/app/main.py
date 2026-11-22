@@ -87,8 +87,17 @@ async def crop_suggestions(request: CropSuggestionRequest, user=Depends(current_
     try:
         forecast, historical, _ = await get_open_meteo(request.latitude, request.longitude)
         return suggest_crops(request, forecast, historical, "live")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Live weather is unavailable right now: {exc}")
+    except httpx.HTTPError as exc:
+        forecast = demo_weather(request.latitude, request.longitude)
+        historical = demo_historical(request.latitude, request.longitude)
+        result = suggest_crops(request, forecast, historical, "demo")
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+            result["warning"] = "The live weather provider is temporarily rate-limiting requests. These clearly labeled demo values let you continue; try again later for a live forecast."
+        else:
+            result["warning"] = "Live weather is temporarily unavailable. These clearly labeled demo values let you continue; try again later for a live forecast."
+        return result
+    except Exception:
+        raise HTTPException(status_code=502, detail="Weather data could not be processed. Please retry in a few minutes.")
 
 
 @app.post("/api/assess")
