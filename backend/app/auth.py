@@ -84,10 +84,15 @@ def register(body: Registration, request: Request, response: Response):
     salt = secrets.token_bytes(16)
     try:
         with connect() as db:
-            cur = db.execute("INSERT INTO users(name,email,password_hash,password_salt) VALUES(?,?,?,?)", (body.name.strip(), email, _hash(body.password, salt), salt))
-            user_id = cur.lastrowid
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+            values = (body.name.strip(), email, _hash(body.password, salt), salt)
+            if settings.database_url:
+                user_id = db.execute("INSERT INTO users(name,email,password_hash,password_salt) VALUES(?,?,?,?) RETURNING id", values).fetchone()["id"]
+            else:
+                user_id = db.execute("INSERT INTO users(name,email,password_hash,password_salt) VALUES(?,?,?,?)", values).lastrowid
+    except Exception as exc:
+        if isinstance(exc, sqlite3.IntegrityError) or getattr(exc, "sqlstate", None) == "23505":
+            raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        raise
     _set_session(response, _issue(user_id))
     return {"user": {"id": user_id, "name": body.name.strip(), "email": email}}
 
@@ -97,7 +102,7 @@ def login(body: Credentials, request: Request, response: Response):
     email = body.email.strip().lower()
     _rate_limit(request, email)
     with connect() as db:
-        row = db.execute("SELECT * FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
+        row = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
     if not row or not secrets.compare_digest(_hash(body.password, row["password_salt"]), row["password_hash"]):
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
     _set_session(response, _issue(row["id"]))

@@ -32,12 +32,14 @@ app.include_router(auth_router)
 
 @app.on_event("startup")
 def startup():
+    if settings.app_env.lower() in {"production", "prod"} and not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required in production. Configure the Supabase PostgreSQL connection string before starting the API.")
     initialize()
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "environment": settings.app_env, "open_meteo_enabled": settings.open_meteo_enabled, "copernicus_configured": is_configured()}
+    return {"status": "ok", "environment": settings.app_env, "database": "postgresql" if settings.database_url else "sqlite", "open_meteo_enabled": settings.open_meteo_enabled, "copernicus_configured": is_configured()}
 
 
 @app.get("/api/geocode")

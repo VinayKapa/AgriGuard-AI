@@ -12,7 +12,7 @@ React + Vite + Leaflet dashboard
   └─ Risk indicators, source status, and recommendations
           │ authenticated API
           ▼
-FastAPI + SQLite
+FastAPI + PostgreSQL (Supabase in deployment) / SQLite (local)
   ├─ Open-Meteo forecast and historical archive adapter
   ├─ Optional Copernicus Sentinel-2 NDVI and imagery adapter
   ├─ Transparent crop/risk screening rules
@@ -73,7 +73,8 @@ Open <http://localhost:5173>.
 |---|---|---|
 | `APP_ENV` | `demo` | Runtime label. |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | Allowed local web origin. |
-| `DATABASE_PATH` | `backend/agriguard.sqlite3` | Optional absolute path for durable SQLite storage. |
+| `DATABASE_PATH` | `backend/agriguard.sqlite3` | Optional local SQLite database path. |
+| `DATABASE_URL` | empty locally; required on Render | PostgreSQL connection URL; when set, PostgreSQL is used instead of local SQLite. |
 | `OPEN_METEO_ENABLED` | `true` | Use live forecast/archive when enabled; no API key required. |
 | `CDSE_CLIENT_ID` | empty | Optional Copernicus Data Space OAuth client ID. |
 | `CDSE_CLIENT_SECRET` | empty | Optional Copernicus Data Space OAuth secret; backend only. |
@@ -105,15 +106,16 @@ For an offline demo, set `OPEN_METEO_ENABLED=false` in `backend/.env` and restar
 
 ## Deploy on Render
 
-The included `render.yaml` creates a FastAPI web service and a React static site, connects their public URLs, enables HTTPS through Render, and mounts a persistent disk for the SQLite database. The API uses HttpOnly secure session cookies in production, limits repeated login/registration attempts, and accepts browser write requests only from the configured frontend origin.
+The included `render.yaml` creates a free FastAPI web service and a React static site, connects their public URLs, and enables HTTPS through Render. The API uses HttpOnly secure session cookies in production, limits repeated login/registration attempts, and accepts browser write requests only from the configured frontend origin. It uses **Supabase PostgreSQL** for persistent accounts and farm profiles, so the data is separate from Render's temporary API filesystem. Render's free API can sleep after 15 idle minutes; Supabase's free database may pause after a week of low activity and has no included downloadable backups, so this is appropriate for a demo rather than critical production data.
 
-1. Push the `agriguard` folder to a GitHub repository. In Render, choose **New → Blueprint**, connect that repository, and select the folder containing `render.yaml` if the repository has other projects.
-2. Create the services from the Blueprint. The API uses a paid Starter service because SQLite needs a persistent disk; the disk is mounted at `/var/data`.
-3. When prompted, add the Copernicus `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` values as Render secrets if you want satellite queries. Leave both unset if you only need live Open-Meteo weather and historical rainfall.
-4. Deploy both services. Open the static site URL shown by Render and create an account. The Blueprint wires the frontend API address and the API's allowed frontend origin automatically.
-5. Confirm the API health check is green at `/api/health`, then try sign-in, farm setup, crop suggestions, and the dashboard. Copernicus credentials can be valid while no cloud-free Sentinel scene is available for a given field/date.
+1. Create a Supabase project on its Free plan. In **Project Settings → Database**, copy the PostgreSQL connection string. Prefer the transaction pooler URL if offered, and keep the password private.
+2. Push the `agriguard` folder to a GitHub repository. In Render, choose **New → Blueprint**, connect that repository, and select the folder containing `render.yaml` if the repository has other projects.
+3. When prompted, set `DATABASE_URL` to the Supabase PostgreSQL connection string. This must be set before the API deploys so it creates the database tables in PostgreSQL. Keep the API on Render's Free plan.
+4. If you want satellite queries, also add `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET` as private Render secrets. Leave them unset for live weather and historical rainfall only.
+5. Deploy both services. Open the static site URL shown by Render and create an account. The Blueprint wires the frontend API address and the API's allowed frontend origin automatically.
+6. Confirm the API health check is green at `/api/health`, then try sign-in, farm setup, crop suggestions, and the dashboard. Copernicus credentials can be valid while no cloud-free Sentinel scene is available for a given field/date.
 
-Never commit `.env`, credentials, or database files. The local `.gitignore` excludes them. Rotating a Copernicus secret in Render requires a new API deploy. The session cookie is marked Secure and HttpOnly in production; the app remains configured for one API instance because SQLite is not intended for multi-instance scaling. Before opening registration broadly, configure account recovery/email delivery and an operational backup process; these require a mail provider and storage policy that this project does not assume. Yield and crop-risk outputs remain screening estimates and should not be treated as agronomic advice.
+Never commit `.env`, credentials, or database files. The local `.gitignore` excludes them. Rotating a Copernicus secret in Render requires a new API deploy. The session cookie is marked Secure and HttpOnly in production. Supabase Free includes 500 MB of database space; free projects can pause after a week of low activity and don't include downloadable backups. Yield and crop-risk outputs remain screening estimates and should not be treated as agronomic advice.
 
 ### Local frontend configuration
 

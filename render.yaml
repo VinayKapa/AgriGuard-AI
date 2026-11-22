@@ -3,14 +3,10 @@ services:
     name: agriguard-api
     runtime: python
     rootDir: backend
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
     healthCheckPath: /api/health
-    disk:
-      name: agriguard-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: APP_ENV
         value: production
@@ -19,8 +15,8 @@ services:
           type: web
           name: agriguard-web
           envVarKey: RENDER_EXTERNAL_URL
-      - key: DATABASE_PATH
-        value: /var/data/agriguard.sqlite3
+      - key: DATABASE_URL
+        sync: false
       - key: OPEN_METEO_ENABLED
         value: "true"
       - key: CDSE_CLIENT_ID

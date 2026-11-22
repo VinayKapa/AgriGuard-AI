@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     app_env: str = "demo"
     frontend_origin: str = "http://localhost:5173"
     database_path: str = ""
+    database_url: str = ""
     open_meteo_enabled: bool = True
     cdse_client_id: str = ""
     cdse_client_secret: str = ""
