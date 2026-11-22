@@ -55,9 +55,9 @@ def suggest_crops(request: CropSuggestionRequest, forecast: list[dict], historic
     return {
         "season": request.season,
         "source_mode": source_mode,
-        "weather_source": "Open-Meteo live forecast" if source_mode == "live" else "Synthetic demo forecast",
+        "weather_source": "Open-Meteo live forecast" if source_mode == "live" else "Recent Open-Meteo forecast cache",
         "historical_source": historical.get("source", "Historical archive unavailable"),
-        "weather_signals": {"average_temperature_14d_c": round(average_temp, 1), "rainfall_14d_mm": round(rain_next, 1), "seasonal_rainfall_normal_mm": round(season_normal, 1) if season_normal else None, "latest_kharif_anomaly_pct": anomaly},
+        "weather_signals": {"average_temperature_14d_c": round(average_temp, 1), "rainfall_14d_mm": round(rain_next, 1), "seasonal_rainfall_normal_mm": round(season_normal, 1) if season_normal else None, "latest_kharif_anomaly_pct": anomaly, "weather_cache_age_minutes": historical.get("weather_cache_age_minutes")},
         "suggestions": ranked[:5],
         "method_note": "Weather-fit screening from live forecast, archived seasonal rainfall, broad temperature/rainfall bands, and selected season. This is a shortlist, not an AI-trained agronomic prescription; soil, irrigation, variety and local crop calendars must also be checked.",
     }

@@ -83,7 +83,8 @@ async def crop_suggestions(request: CropSuggestionRequest, user=Depends(current_
         raise HTTPException(status_code=503, detail="Live weather is currently disabled. Please try again later.")
     try:
         forecast, historical, _ = await get_open_meteo(request.latitude, request.longitude)
-        return suggest_crops(request, forecast, historical, "live")
+        cache_age = historical.get("weather_cache_age_minutes")
+        return suggest_crops(request, forecast, historical, "cached" if cache_age is not None else "live")
     except httpx.HTTPError as exc:
         if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
             raise HTTPException(status_code=503, detail="The live weather provider is temporarily rate-limiting requests. Please wait a few minutes and retry.")
@@ -104,7 +105,7 @@ async def create_assessment(request: FarmRequest, user=Depends(current_user)):
         raise HTTPException(status_code=503, detail="Live weather is temporarily unavailable. Please retry shortly.")
     except Exception:
         raise HTTPException(status_code=502, detail="Weather data could not be processed. Please retry shortly.")
-    mode = "live"
+    mode = "cached" if historical.get("weather_cache_age_minutes") is not None else "live"
     try:
         satellite = await get_sentinel_observation(request.latitude, request.longitude)
     except Exception as exc:

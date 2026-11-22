@@ -1,17 +1,63 @@
 from datetime import date, timedelta
-from time import monotonic
+from time import monotonic, time
+import json
 import httpx
+from app.database import connect
 
 _CACHE = {}
 _CACHE_TTL_SECONDS = 15 * 60
+_STALE_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+
+def _cache_key(latitude: float, longitude: float) -> str:
+    return f"{latitude:.3f},{longitude:.3f}"
+
+
+def _load_persistent(key: str):
+    try:
+        with connect() as db:
+            row = db.execute("SELECT payload, fetched_at FROM weather_cache WHERE cache_key=?", (key,)).fetchone()
+        if row:
+            return json.loads(row["payload"]), float(row["fetched_at"])
+    except Exception:
+        pass
+    return None
+
+
+def _save_persistent(key: str, data: tuple, fetched_at: float) -> None:
+    try:
+        with connect() as db:
+            db.execute(
+                "INSERT INTO weather_cache(cache_key,payload,fetched_at) VALUES(?,?,?) "
+                "ON CONFLICT(cache_key) DO UPDATE SET payload=excluded.payload, fetched_at=excluded.fetched_at",
+                (key, json.dumps(data), fetched_at),
+            )
+    except Exception:
+        # Weather remains usable when an optional cache write fails.
+        pass
+
+
+def _with_cache_age(data: tuple, fetched_at: float, now: float) -> tuple:
+    forecast, historical, current = data
+    historical = dict(historical)
+    historical["weather_cache_age_minutes"] = max(1, round((now - fetched_at) / 60))
+    return forecast, historical, current
 
 async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict], dict, dict]:
     """Fetch forecast plus a comparable historical period when network access is available."""
-    key = (round(latitude, 3), round(longitude, 3))
+    key = _cache_key(latitude, longitude)
     now = monotonic()
     cached = _CACHE.get(key)
     if cached and now < cached["fresh_until"]:
         return cached["data"]
+    persistent = _load_persistent(key)
+    if persistent:
+        payload, fetched_at = persistent
+        age = time() - fetched_at
+        if age < _CACHE_TTL_SECONDS:
+            data = _with_cache_age(tuple(payload), fetched_at, time())
+            _CACHE[key] = {"data": data, "fresh_until": now + max(1, _CACHE_TTL_SECONDS - age)}
+            return data
     start = date.today().isoformat()
     end = (date.today() + timedelta(days=13)).isoformat()
     archive_start = (date.today() - timedelta(days=3650)).isoformat()
@@ -22,7 +68,11 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
         forecast_response = await client.get(base, params={**common, "forecast_days": 14})
         try:
             forecast_response.raise_for_status()
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                old = persistent or ((cached["data"], cached["fetched_at"]) if cached else None)
+                if old and time() - old[1] <= _STALE_CACHE_TTL_SECONDS:
+                    return _with_cache_age(tuple(old[0]), old[1], time())
             raise
         raw = forecast_response.json()["daily"]
         forecast = [{"date": raw["time"][i], "rainfall_mm": raw["precipitation_sum"][i] or 0, "max_temp_c": raw["temperature_2m_max"][i], "min_temp_c": raw["temperature_2m_min"][i]} for i in range(len(raw["time"]))]
@@ -41,7 +91,11 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
                 "hot_days_per_season": None,
                 "note": "Historical archive is temporarily unavailable; only the live forecast is included.",
             }
-            return forecast, summary, {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
+            current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
+            result = (forecast, summary, current)
+            _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS, "fetched_at": time()}
+            _save_persistent(key, result, _CACHE[key]["fetched_at"])
+            return result
     annual = {}
     seasonal = {"Kharif": {}, "Rabi": {}, "Zaid": {}}
     for i, day in enumerate(archive["time"]):
@@ -80,7 +134,9 @@ async def get_open_meteo(latitude: float, longitude: float) -> tuple[list[dict],
     }
     current = {"temperature_c": forecast[0]["max_temp_c"], "rainfall_mm": forecast[0]["rainfall_mm"], "humidity_pct": None, "wind_kph": None}
     result = (forecast, summary, current)
-    _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS}
+    fetched_at = time()
+    _CACHE[key] = {"data": result, "fresh_until": now + _CACHE_TTL_SECONDS, "fetched_at": fetched_at}
+    _save_persistent(key, result, fetched_at)
     if len(_CACHE) > 256:
         oldest_key = min(_CACHE, key=lambda item: _CACHE[item]["fresh_until"])
         _CACHE.pop(oldest_key, None)

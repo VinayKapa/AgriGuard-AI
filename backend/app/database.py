@@ -78,6 +78,7 @@ def initialize():
             "CREATE TABLE IF NOT EXISTS auth_attempts (id BIGSERIAL PRIMARY KEY, bucket TEXT NOT NULL, attempted_at TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS idx_auth_attempts_bucket_time ON auth_attempts(bucket, attempted_at)",
             "CREATE TABLE IF NOT EXISTS farms (user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, payload TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS weather_cache (cache_key TEXT PRIMARY KEY, payload TEXT NOT NULL, fetched_at DOUBLE PRECISION NOT NULL)",
             "DELETE FROM sessions WHERE user_id NOT IN (SELECT id FROM users)",
         ]
         with connect() as db:
@@ -112,6 +113,11 @@ def initialize():
             user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             payload TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS weather_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            fetched_at REAL NOT NULL
         );
         DELETE FROM sessions WHERE user_id NOT IN (SELECT id FROM users);
         """)
